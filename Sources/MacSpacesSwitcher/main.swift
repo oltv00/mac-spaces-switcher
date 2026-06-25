@@ -14,6 +14,11 @@ if arguments.contains("--probe") {
     exit(0)
 }
 
+if arguments.contains("--probe-move") {
+    controller.probeMoveWindow()
+    exit(0)
+}
+
 // Same probe, but first put the process in the agent's exact state (an accessory
 // NSApplication) to test whether that context is what breaks the switch.
 if arguments.contains("--probe-app") {
@@ -50,7 +55,11 @@ if !AXIsProcessTrustedWithOptions(axOptions) {
 }
 
 let hotkeyManager = HotkeyManager { action in
-    controller.switchSpace(action)
+    switch action {
+    case .moveLeft:  controller.moveFocusedWindow(.left)
+    case .moveRight: controller.moveFocusedWindow(.right)
+    default:         controller.switchSpace(action)
+    }
 }
 hotkeyManager.register(shortcuts)
 

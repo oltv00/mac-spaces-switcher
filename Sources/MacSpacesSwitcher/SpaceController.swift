@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CSkyLight
 
 /// One space on a display. `type == 0` is a normal desktop; other values
@@ -61,7 +62,24 @@ enum SpaceLogic {
             let desktops = display.spaces.filter { $0.type == 0 }
             guard n >= 1, n <= desktops.count else { return nil }
             return desktops[n - 1].id
+
+        case .moveLeft, .moveRight:
+            return nil // window-move actions resolve via adjacentDesktop, not here
         }
+    }
+
+    /// Adjacent Space for a window move — like targetSpace(.left/.right) but only
+    /// when the immediate neighbor is a normal desktop (type 0). Moving a window
+    /// onto a fullscreen-app Space isn't meaningful, so that (and the list ends)
+    /// clamps to nil (a safe no-op). `action` must be `.left` or `.right`.
+    static func adjacentDesktop(for action: Action, in display: DisplayLayout) -> UInt64? {
+        guard let index = display.spaces.firstIndex(where: {
+            $0.id == display.currentSpaceID
+        }) else { return nil }
+        let target = (action == .left) ? index - 1 : index + 1
+        guard target >= 0, target < display.spaces.count else { return nil }
+        let space = display.spaces[target]
+        return space.type == 0 ? space.id : nil
     }
 
     /// Finds the layout for the focused display. Prefers an exact match on the
@@ -141,6 +159,65 @@ final class SpaceController {
                 MSSSwitchSpaceGesture(direction, at.x, at.y)
             }
         }
+    }
+
+    /// Moves the focused window to the adjacent desktop Space (left/right) on the
+    /// focused display, then follows it via the existing instant swipe. No-ops
+    /// safely when the layout/window can't be read or the neighbor isn't a
+    /// desktop (end of list or a fullscreen Space). `action` is `.left`/`.right`.
+    func moveFocusedWindow(_ action: Action) {
+        let connection = CGSMainConnectionID()
+        guard let cfDisplays = CGSCopyManagedDisplaySpaces(connection),
+              let rawDisplays = (cfDisplays as NSArray) as? [[String: Any]] else {
+            logError("could not read display spaces")
+            return
+        }
+        let layouts = SpaceLogic.parseDisplaySpaces(rawDisplays)
+        let uuid = activeMenuBarDisplay(connection) ?? currentDisplayUUID()
+        guard let focused = SpaceLogic.focusedDisplay(
+            in: layouts, focusedUUID: uuid, isPrimary: isMainDisplayPrimary()
+        ) else {
+            logError("could not determine focused display")
+            return
+        }
+        guard let target = SpaceLogic.adjacentDesktop(for: action, in: focused) else {
+            debugLog("\(action): no-op "
+                     + "(no adjacent desktop on \(focused.displayIdentifier))")
+            return
+        }
+        guard let windowID = focusedWindowID() else { return }
+        debugLog("\(action): move window \(windowID) "
+                 + "\(focused.currentSpaceID) -> \(target), then follow")
+        CGSMoveWindowsToManagedSpace(connection,
+                                     [NSNumber(value: windowID)] as CFArray,
+                                     target)
+        switchSpace(action) // follow — one swipe lands on the same neighbor
+    }
+
+    /// CGWindowID of the frontmost app's focused window, via the Accessibility
+    /// API. nil (logged) when there's no frontmost app, no standard focused
+    /// window (e.g. Finder desktop), or the id can't be resolved.
+    private func focusedWindowID() -> CGWindowID? {
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            logError("no frontmost application")
+            return nil
+        }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+                  appElement, kAXFocusedWindowAttribute as CFString, &value
+              ) == .success,
+              let window = value, CFGetTypeID(window) == AXUIElementGetTypeID() else {
+            logError("no focused window for \(app.localizedName ?? "frontmost app")")
+            return nil
+        }
+        var windowID: CGWindowID = 0
+        guard _AXUIElementGetWindow((window as! AXUIElement), &windowID) == .success,
+              windowID != 0 else {
+            logError("could not resolve focused window id")
+            return nil
+        }
+        return windowID
     }
 
     /// Runs `performSwitch` and, when MSS_DEBUG is set, brackets it with a
@@ -254,6 +331,72 @@ final class SpaceController {
         CGSManagedDisplaySetCurrentSpace(connection,
                                          focused.displayIdentifier as CFString,
                                          realActive)
+    }
+
+    /// Investigative probe (companion to probeSwitch): measures whether
+    /// `CGSMoveWindowsToManagedSpace` actually moves the focused window to
+    /// another Space. Uses `CGSCopySpacesForWindows` as ground truth — the
+    /// window's Space membership before vs. after the call. Restores the window
+    /// to its original Space if the move took effect.
+    func probeMoveWindow() {
+        let connection = CGSMainConnectionID()
+        guard let windowID = focusedWindowID() else {
+            print("Probe needs a focused window; none resolved. "
+                  + "Focus a normal window, then run --probe-move.")
+            return
+        }
+        guard let cfDisplays = CGSCopyManagedDisplaySpaces(connection),
+              let rawDisplays = (cfDisplays as NSArray) as? [[String: Any]] else {
+            logError("could not read display spaces")
+            return
+        }
+        let layouts = SpaceLogic.parseDisplaySpaces(rawDisplays)
+        let uuid = activeMenuBarDisplay(connection) ?? currentDisplayUUID()
+        guard let focused = SpaceLogic.focusedDisplay(
+            in: layouts, focusedUUID: uuid, isPrimary: isMainDisplayPrimary()
+        ) else {
+            logError("could not determine focused display")
+            return
+        }
+        let desktops = focused.spaces.filter { $0.type == 0 }
+        guard let target = desktops.first(where: { $0.id != focused.currentSpaceID })
+        else {
+            print("Probe needs >= 2 desktop spaces on the focused display; "
+                  + "found \(desktops.count).")
+            return
+        }
+
+        let windows = [NSNumber(value: windowID)] as CFArray
+        let before = spacesForWindows(connection, windows)
+        print("Focused window:        \(windowID)")
+        print("Focused display:       \(focused.displayIdentifier)")
+        print("Current space:         \(focused.currentSpaceID)")
+        print("Window spaces before:  \(before)")
+        print("Moving window -> space \(target.id) ...")
+
+        CGSMoveWindowsToManagedSpace(connection, windows, target.id)
+        usleep(300_000)
+
+        let after = spacesForWindows(connection, windows)
+        print("Window spaces after:   \(after)")
+        print("---")
+        if Set(before) != Set(after) {
+            print("VERDICT: the move WORKED — window Space membership changed.")
+            CGSMoveWindowsToManagedSpace(connection, windows, focused.currentSpaceID)
+            print("(restored window to space \(focused.currentSpaceID))")
+        } else {
+            print("VERDICT: BLOCKED — CGSMoveWindowsToManagedSpace is a no-op from "
+                  + "this process (needs the SIP scripting addition).")
+        }
+    }
+
+    /// Space ids the given windows belong to, via the private
+    /// CGSCopySpacesForWindows (mask 0x7 = all space types). Empty on failure.
+    private func spacesForWindows(_ connection: CGSConnectionID,
+                                  _ windows: CFArray) -> [UInt64] {
+        guard let cf = CGSCopySpacesForWindows(connection, 0x7, windows),
+              let arr = (cf as NSArray) as? [NSNumber] else { return [] }
+        return arr.map { $0.uint64Value }
     }
 
     /// Window number -> owning app name for the normal (layer 0) windows that are

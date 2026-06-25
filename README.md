@@ -42,6 +42,8 @@ target desktop.
 - **Instant** Space switching — no animation, regardless of monitor refresh rate.
 - **No ghosting** — the previous Space's windows are cleanly replaced.
 - **Relative** moves (`⌃←` / `⌃→`) and **absolute** jumps (`⌃1`…`⌃9`).
+- **Move the active window** one Space left/right (`⌃⇧←` / `⌃⇧→`) and follow it
+  there.
 - **Multi-monitor, keyboard-only** — switches the display with the frontmost app
   (follows `⌘-Tab`) and never moves your cursor.
 - **Clamps** at the first/last Space — no wrap-around; out-of-range jumps are
@@ -102,15 +104,22 @@ Edit `~/.config/mac-spaces-switcher/config.json`:
   "shortcuts": {
     "left": "ctrl+left",
     "right": "ctrl+right",
+    "move-left": "ctrl+shift+left",
+    "move-right": "ctrl+shift+right",
     "1": "ctrl+1",
     "9": "ctrl+9"
   }
 }
 ```
 
-- **Action keys:** `left`, `right`, `1`…`9`.
+- **Action keys:** `left`, `right`, `move-left`, `move-right`, `1`…`9`.
 - **Hotkey strings:** `modifier+…+key`. Modifiers: `ctrl`, `alt`, `cmd`,
   `shift`. Keys: `left`, `right`, `up`, `down`, `0`…`9`.
+- **`move-left` / `move-right`** move the frontmost window to the neighboring
+  Space and follow it. They default to `ctrl+shift+←/→` — not native macOS
+  shortcuts, so there's nothing extra to disable — and reuse the Accessibility
+  permission the agent already needs. Moving onto a fullscreen-app Space or past
+  the first/last desktop is a safe no-op.
 - Missing or invalid entries are simply skipped.
 
 The config is read **once at launch**. After editing, reload the agent:

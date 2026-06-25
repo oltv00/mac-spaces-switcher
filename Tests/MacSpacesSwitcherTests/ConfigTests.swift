@@ -23,11 +23,10 @@ final class ConfigTests: XCTestCase {
         XCTAssertNotNil(parsed[.left])
     }
 
-    func testDefaultsParseToElevenShortcuts() {
+    func testDefaultsParseToThirteenShortcuts() {
         let parsed = Config.parseShortcuts(Config.defaultShortcuts)
-        XCTAssertEqual(parsed.count, 11) // left, right, 1...9
-        XCTAssertNotNil(parsed[.left])
-        XCTAssertNotNil(parsed[.right])
-        XCTAssertNotNil(parsed[.jump(9)])
+        XCTAssertEqual(parsed.count, 13) // left, right, move-left, move-right, 1...9
+        XCTAssertEqual(parsed[.moveLeft], Hotkey(keyCode: 0x7B, modifiers: 0x1200))
+        XCTAssertEqual(parsed[.moveRight], Hotkey(keyCode: 0x7C, modifiers: 0x1200))
     }
 }

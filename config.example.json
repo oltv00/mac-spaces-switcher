@@ -2,6 +2,8 @@
   "shortcuts": {
     "left": "ctrl+left",
     "right": "ctrl+right",
+    "move-left": "ctrl+shift+left",
+    "move-right": "ctrl+shift+right",
     "1": "ctrl+1",
     "2": "ctrl+2",
     "3": "ctrl+3",

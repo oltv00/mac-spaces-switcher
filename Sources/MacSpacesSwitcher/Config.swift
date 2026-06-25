@@ -4,6 +4,8 @@ import Foundation
 enum Action: Hashable {
     case left
     case right
+    case moveLeft
+    case moveRight
     case jump(Int)
 }
 
@@ -49,6 +51,8 @@ enum Config {
         switch key {
         case "left": return .left
         case "right": return .right
+        case "move-left": return .moveLeft
+        case "move-right": return .moveRight
         default:
             if let n = Int(key), (1...9).contains(n) { return .jump(n) }
             return nil
@@ -70,6 +74,7 @@ enum Config {
     /// The native-key defaults: ctrl+arrows and ctrl+1...9.
     static let defaultShortcuts: [String: String] = [
         "left": "ctrl+left", "right": "ctrl+right",
+        "move-left": "ctrl+shift+left", "move-right": "ctrl+shift+right",
         "1": "ctrl+1", "2": "ctrl+2", "3": "ctrl+3",
         "4": "ctrl+4", "5": "ctrl+5", "6": "ctrl+6",
         "7": "ctrl+7", "8": "ctrl+8", "9": "ctrl+9",
